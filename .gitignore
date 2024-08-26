@@ -1,0 +1,9 @@
+data/
+*.log
+*.txt
+scripts/.ipynb_checkpoints/
+scripts/logs/
+notebooks/.ipynb_checkpoints/
+*.sh
+*.error
+*.out
