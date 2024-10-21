@@ -5,10 +5,40 @@ import torchmetrics
 import numpy as np
 import pandas as pd
 import torch.nn as nn
+import torch.optim as optim
 from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
 
+class VAE(nn.Module):
+    def __init__(self, input_dim, hidden_dim, latent_dim:
+        super(VAE, self).__init__()
+
+        # Encoder
+        self.fc1 = nn.Linear(input_dim)
+        self.fg21 = nn.Linear(hidden_dim, latent_dim)
+        self.fc22 = nn.Linear(hidden_dim, latent_dim)
+
+        # Decoder
+        self.fc3 = nn.Linear(latent_dim, hidden_dim)
+        self.fc4 = nn.Linear(hidden_dim, input_dim)
+
+    def encode(self, x):
+        h1 = torch.relu(self.fc1(x))
+        return self.fc21(h1), self.fc22(h1)
+
+    def decode(self, z):
+        h3 = torch.relu(self.fc3(z))
+        return torch.sigmoid(self.fc4(h3))
+
+    def forwad(self, x):
+        mu, logvar = self.encode(x.view(-1, 784))
+        z = self.parameterize(mu, logvar, z)
+        return self.decode(z), mu, logvar
+def loss_function(recon_x, x, mu, logvar):
+    BCE = nn.functional.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum')
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return BCE + KLD
 
 def main():
     '''
@@ -20,7 +50,7 @@ def main():
     # instantiate model and train
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    n_epochs = 10 
+    n_epochs = 10
     clean_up = True
 
     all_imgs = ['SQ1631_s1_R', 'SQ1631_s2_R', 'SQ1631_s3_N', 'SQ1631_s4_N',
@@ -46,15 +76,19 @@ def main():
         mask_path = f'{data_root_path}/{img_id}/masks/{mask_id}.png'
         tile_path = f'{data_root_path}/{img_id}/tiles/{mask_id}/{tile_size}-{overlap}-{area_threshold}/tile_positions_top_left.npy'
         if clean_up:
-            os.remove(mask_path)
-            os.remove(tile_path)
+            try:
+                os.remove(mask_path)
+                os.remove(tile_path)
+            except FileNotFoundError:
+                print('No such file or directory', mask_path)
         if not os.path.isfile(mask_path):
             img_ds.generate_mask()
             print(f'Mask {mask_id} generated for {img_id}.')
         if not os.path.isfile(tile_path):
-            img_ds.generate_tiles(mask_path=mask_path, mask_id=mask_id, 
+            img_ds.generate_tiles(mask_path=mask_path, mask_id=mask_id,
                                   tile_size=tile_size, overlap=overlap, threshold=area_threshold)
-            print(f'Tiles from {mask_id} generated for {img_id}, tile_size: {tile_size}; overlap: {overlap}; area_threshold: {area_threshold}.')
+            print(
+                f'Tiles from {mask_id} generated for {img_id}, tile_size: {tile_size}; overlap: {overlap}; area_threshold: {area_threshold}.')
 
     def collate_fn(batch):
         inputs, labels, img_ids = zip(*batch)
@@ -63,43 +97,46 @@ def main():
         inputs = inputs.to(device)
         labels = labels.to(device)
         return inputs, labels
-        
+
     skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
-    
+
     kfold_accuracy = []
     kfold_auc = []
-    
+
     # data augmentation transforms for training
     trn_transform = transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-            transforms.RandomRotation(degrees=45)
-            ])
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        transforms.RandomRotation(degrees=45)
+    ])
 
     for i, (trn_idx, tst_idx) in enumerate(skf.split(X=np.zeros(len(label_ls)), y=label_ls)):
         trn_idx = np.array(trn_idx, dtype=int)
         tst_idx = np.array(tst_idx, dtype=int)
-        print(all_imgs[trn_idx])
         print(f'Fold {i}')
         print('--------------------------------')
-        
-        trn_dataset = dataset.ZarrSlidesDataset(slides_root_path=data_root_path, img_ids = all_imgs[trn_idx], 
-                                                tile_size = tile_size, overlap = overlap, threshold = area_threshold, mask_id = mask_id, 
-                                                transform = trn_transform, labels = label_ls[trn_idx], dataset_class = dataset.ZarrDataset)
-        tst_dataset = dataset.ZarrSlidesDataset(slides_root_path=data_root_path, img_ids = all_imgs[tst_idx], 
-                                                tile_size = tile_size, overlap = overlap, threshold = area_threshold, mask_id = mask_id, 
-                                                transform = None, labels = label_ls[tst_idx], dataset_class = dataset.ZarrDataset)
+
+        trn_dataset = dataset.ZarrSlidesDataset(slides_root_path=data_root_path, img_ids=all_imgs[trn_idx],
+                                                tile_size=tile_size, overlap=overlap, threshold=area_threshold,
+                                                mask_id=mask_id,
+                                                transform=trn_transform, labels=label_ls[trn_idx],
+                                                dataset_class=dataset.ZarrDataset)
+        tst_dataset = dataset.ZarrSlidesDataset(slides_root_path=data_root_path, img_ids=all_imgs[tst_idx],
+                                                tile_size=tile_size, overlap=overlap, threshold=area_threshold,
+                                                mask_id=mask_id,
+                                                transform=None, labels=label_ls[tst_idx],
+                                                dataset_class=dataset.ZarrDataset)
 
         # Define data loaders for training and testing data in this fold
         trn_loader = DataLoader(trn_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
         tst_loader = DataLoader(tst_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
-        
+
         # Initialize the model for this fold
         model = SimpleCNN(in_channels=917).to(device)
         auc, accuracy = train_and_evaluate(n_epochs, model, trn_loader, tst_loader)
         kfold_accuracy.append(accuracy)
         kfold_auc.append(auc)
-    
+
     print('K Fold Accuracy:')
     print(kfold_accuracy)
     print('K Fold AUROC:')
@@ -110,28 +147,28 @@ class SimpleCNN(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
         self.conv = nn.Sequential(nn.Conv2d(in_channels, 16, 1),
-                                   nn.ReLU(),
-                                   nn.Conv2d(16, 8, 3, stride=2),
-                                   nn.ReLU(),
-                                   nn.Conv2d(8, 8, 3, stride=2),
-                                   nn.ReLU(),
-                                   nn.Conv2d(8, 8, 3, stride=2),
-                                   nn.ReLU()
+                                  nn.ReLU(),
+                                  nn.Conv2d(16, 8, 3, stride=2),
+                                  nn.ReLU(),
+                                  nn.Conv2d(8, 8, 3, stride=2),
+                                  nn.ReLU(),
+                                  nn.Conv2d(8, 8, 3, stride=2),
+                                  nn.ReLU()
                                   )
         self.fc = nn.Linear(8, 1)
 
     def forward(self, x):
         x = self.conv(x)
-        #print(x.shape)
-        x = torch.mean(x, dim = (2, 3), keepdim = False) # Global pooling
-        #print(x.shape)
+        # print(x.shape)
+        x = torch.mean(x, dim=(2, 3), keepdim=False)  # Global pooling
+        # print(x.shape)
         out = self.fc(x)
         out = torch.squeeze(out)
         if out.ndim == 0:
             out = out.unsqueeze(0)
         return out
 
-   
+
 def train_and_evaluate(n_epochs, model, trn_loader, tst_loader):
     criterion = nn.BCEWithLogitsLoss()
     accuracy_fun = torchmetrics.Accuracy(task='binary')
@@ -149,7 +186,8 @@ def train_and_evaluate(n_epochs, model, trn_loader, tst_loader):
             optimizer.step()
             running_loss += loss.item()
             if i % 100 == 9:  # Print every 100 batches
-                print(f'Epoch [{epoch + 1}/{n_epochs}], Step [{i + 1}/{len(trn_loader)}], Loss: {running_loss / 100:.4f}')
+                print(
+                    f'Epoch [{epoch + 1}/{n_epochs}], Step [{i + 1}/{len(trn_loader)}], Loss: {running_loss / 100:.4f}')
                 running_loss = 0.0
         print(f'Epoch [{epoch + 1}/{n_epochs}] final loss: {loss}')
     print('Finished Training')
@@ -168,15 +206,13 @@ def train_and_evaluate(n_epochs, model, trn_loader, tst_loader):
             loss = criterion(logits, labels)
             running_loss += loss
     all_probs = torch.cat(all_probs)
-    #print(all_probs)
     all_labels = torch.cat(all_labels)
-    #print(all_labels)
     avg_loss = running_loss / (i + 1)
     accuracy = accuracy_fun(all_probs, all_labels)
     auc = roc_fun(all_probs, all_labels)
     print(f'Test loss: {avg_loss}; AUROC: {auc}; Accuracy: {accuracy}')
     return accuracy, auc
 
-    
+
 if __name__ == '__main__':
     main()

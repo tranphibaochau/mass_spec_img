@@ -4,37 +4,36 @@ import zarr
 from PIL import Image
 import numpy as np
 import pandas as pd
+from pathlib import Path
 
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--root_dir',type=str) 
 parser.add_argument('--save_dir',type=str, default='../data/npy')
-parser.add_argument('--file_type', type=str, default='zarr') 
-parser.add_argument('--slide_name',type=str)
+parser.add_argument('--file_type', type=str, default='zarr')
+parser.add_argument('--sample_size', type=int, default=None)
 
 args = parser.parse_args()
-#root_dir = '../data/SQ1631_img_cropped'
-#save_dir = '../data/npy'
-#slide_name = 'SQ1631'
 root_dir = args.root_dir
 save_dir = args.save_dir
 file_type = args.file_type
-slide_name = args.slide_name
 
-fn_ls = [img for img in os.listdir(root_dir) if img.endswith('.png')]
+fn_ls = [str(img) for img in Path(root_dir).rglob('*cropped/*.png')]
+print(len(fn_ls))
 fn_ls.sort()
 for i in range(4):
     arr = []
     channel_names = []
     for fn in fn_ls:
-        parts = fn.split(' ')
-        s = parts[8].split('_')[-2]
+        slide_name = fn.split('/')[-2].split('_')[0]
+        s = fn.split('_')[-2]
         if s.endswith(str(i+1)):
-            r = parts[8].split('_')[-1][0]
-            channel = np.asarray(Image.open(os.path.join(root_dir, fn)).convert('L'))    # read image as single channel and convert to np array
+            r = fn.split('_')[-1][0]
+            channel = np.asarray(Image.open(fn).convert('L'))    # read image as single channel and convert to np array
             arr.append(channel)
-            name = '-'.join(parts[:8] + [parts[8].split('_')[0]])
-            channel_names.append(name)
+            file_name = fn.split('/')[-1].split('.png')[0][:-5]  # record file name
+            file_name = "-".join(file_name.split(' '))
+            channel_names.append(file_name)
     arr = np.array(arr)
     print(f'Shape of slide {i+1} in {root_dir}: {arr.shape}.')
     df = pd.DataFrame(channel_names, columns=['channel_name'])
