@@ -9,36 +9,11 @@ import torch.optim as optim
 from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
+from matplotlib import pyplot as plt
+from mpl_toolkits.axes_grid1 import ImageGrid
 
-class VAE(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim:
-        super(VAE, self).__init__()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Encoder
-        self.fc1 = nn.Linear(input_dim)
-        self.fg21 = nn.Linear(hidden_dim, latent_dim)
-        self.fc22 = nn.Linear(hidden_dim, latent_dim)
-
-        # Decoder
-        self.fc3 = nn.Linear(latent_dim, hidden_dim)
-        self.fc4 = nn.Linear(hidden_dim, input_dim)
-
-    def encode(self, x):
-        h1 = torch.relu(self.fc1(x))
-        return self.fc21(h1), self.fc22(h1)
-
-    def decode(self, z):
-        h3 = torch.relu(self.fc3(z))
-        return torch.sigmoid(self.fc4(h3))
-
-    def forwad(self, x):
-        mu, logvar = self.encode(x.view(-1, 784))
-        z = self.parameterize(mu, logvar, z)
-        return self.decode(z), mu, logvar
-def loss_function(recon_x, x, mu, logvar):
-    BCE = nn.functional.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum')
-    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    return BCE + KLD
 
 def main():
     '''
@@ -128,19 +103,38 @@ def main():
                                                 dataset_class=dataset.ZarrDataset)
 
         # Define data loaders for training and testing data in this fold
-        trn_loader = DataLoader(trn_dataset, batch_size=4, shuffle=True, collate_fn=collate_fn)
-        tst_loader = DataLoader(tst_dataset, batch_size=4, shuffle=False, collate_fn=collate_fn)
+        trn_loader = DataLoader(trn_dataset, batch_size=100, shuffle=True, collate_fn=collate_fn)
+        tst_loader = DataLoader(tst_dataset, batch_size=100, shuffle=False, collate_fn=collate_fn)
 
-        # Initialize the model for this fold
+        #dataiter = iter(trn_loader)
+        image = next(iter(trn_loader))
+
+        num_samples = 25
+        sample_images = [image[0][i, 0] for i in range(num_samples)]
+
+        fig = plt.figure(figsize=(5, 5))
+        grid = ImageGrid(fig, 111, nrows_ncols=(5, 5), axes_pad=0.1)
+
+        for ax, im in zip(grid, sample_images):
+            ax.imshow(im, cmap='gray')
+            ax.axis('off')
+
+        plt.show()
+
+        """# Initialize CNN model
         model = SimpleCNN(in_channels=917).to(device)
         auc, accuracy = train_and_evaluate(n_epochs, model, trn_loader, tst_loader)
         kfold_accuracy.append(accuracy)
-        kfold_auc.append(auc)
+        kfold_auc.append(auc)"""
 
-    print('K Fold Accuracy:')
+        """model = VAE().to(device)
+        optimizer = optim.Adam(model.parameters(), lr=1e-3)
+        train(trn_loader, model, optimizer, epochs=5, device=device)"""
+
+    """print('K Fold Accuracy:')
     print(kfold_accuracy)
     print('K Fold AUROC:')
-    print(kfold_auc)
+    print(kfold_auc)"""
 
 
 class SimpleCNN(nn.Module):
@@ -169,7 +163,80 @@ class SimpleCNN(nn.Module):
         return out
 
 
-def train_and_evaluate(n_epochs, model, trn_loader, tst_loader):
+class VAE(nn.Module):
+
+    def __init__(self, input_dim=784, hidden_dim=400, latent_dim=200, device=device):
+        super(VAE, self).__init__()
+
+        # encoder
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, latent_dim),
+            nn.LeakyReLU(0.2)
+        )
+
+        # latent mean and variance
+        self.mean_layer = nn.Linear(latent_dim, 2)
+        self.logvar_layer = nn.Linear(latent_dim, 2)
+
+        # decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(2, latent_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(latent_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, input_dim),
+            nn.Sigmoid()
+        )
+
+    def encode(self, x):
+        x = self.encoder(x)
+        mean, logvar = self.mean_layer(x), self.logvar_layer(x)
+        return mean, logvar
+
+    def reparameterization(self, mean, var):
+        epsilon = torch.randn_like(var).to(device)
+        z = mean + var * epsilon
+        return z
+
+    def decode(self, x):
+        return self.decoder(x)
+
+    def forward(self, x):
+        mean, logvar = self.encode(x)
+        z = self.reparameterization(mean, logvar)
+        x_hat = self.decode(z)
+        return x_hat, mean, log_var
+
+def loss_function(x, x_hat, mean, log_var):
+    reproduction_loss = nn.functional.binary_cross_entropy(x_hat, x, reduction='sum')
+    KLD = - 0.5 * torch.sum(1+ log_var - mean.pow(2) - log_var.exp())
+
+    return reproduction_loss + KLD
+
+
+def train(train_loader, model, optimizer, epochs, device):
+    model.train()
+    for epoch in range(epochs):
+        overall_loss = 0
+        for batch_idx, (x, _) in enumerate(train_loader):
+            #x = x.view(4, x_dim).to(device) # batch_size = 4
+
+            optimizer.zero_grad()
+
+            x_hat, mean, log_var = model(x)
+            loss = loss_function(x, x_hat, mean, log_var)
+
+            overall_loss += loss.item()
+
+            loss.backward()
+            optimizer.step()
+
+        print("\tEpoch", epoch + 1, "\tAverage Loss: ", overall_loss / (batch_idx * batch_size))
+    return overall_loss
+
+def train_cnn_model(n_epochs, model, trn_loader, tst_loader):
     criterion = nn.BCEWithLogitsLoss()
     accuracy_fun = torchmetrics.Accuracy(task='binary')
     roc_fun = torchmetrics.AUROC(task='binary')

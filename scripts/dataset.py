@@ -32,6 +32,7 @@ class ZarrDataset(data.Dataset):
     def read_slide(self):
         ''' Read numpy file on disk mapped to memory '''
         import zarr
+
         zarr_path = f'{self.root_path}/{self.img_id}/slide.zarr'
         slide = zarr.open(zarr_path, mode='r')
         # print(f'Zarr dataset loaded from {zarr_path}')
