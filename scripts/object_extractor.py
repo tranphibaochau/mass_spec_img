@@ -122,15 +122,12 @@ def extract_objects(image_path, coordinates, output_size, output_path):
             None (saves images to disk)
     """
 
-    # make sure output_path is created
-    os.makedirs(output_path, exist_ok=True)
-
     images = [f for f in os.listdir(image_path) if f.endswith(".png")]  # find list of images in the folder
     for img in images:
         print("Cropping:", img)
-        # Open the original image
+        # open the original image
         original_image = Image.open(os.path.join(image_path, img))
-
+        img_name = img.split(".png")[0]
         for i, (top_left, bottom_right) in enumerate(coordinates):
             # ignore the first tissue
             if i > 0:
@@ -151,29 +148,45 @@ def extract_objects(image_path, coordinates, output_size, output_path):
                 # resize it to the desired size, if needed
                 if max_output_size > output_size:
                     new_image = new_image.resize((output_size, output_size))
+
+                # store image to a folder with the same file_name as the input
+                output_folder = image_path.split("/")[-1].split("_")[0] + "_cropped"
                 # convert to grey scale image before saving
-                new_image.convert("L").save(os.path.join(output_path, f"{img}_s{i}_{output_size}x{output_size}.png"))
+                if output_path is not None:
+                    output_full_path = os.path.join(output_path, output_folder)
+                    os.makedirs(output_full_path, exist_ok=True)
+                    new_image.save(os.path.join(output_full_path, f"{img_name}_s{i}.png"))
+                else:
+                    os.makedirs(output_folder, exist_ok=True)
+                    new_image.save(f"{os.getcwd()}/{output_folder}/{img_name}_s{i}.png")
+
     return
 
-
-
-"""mask_path = "/home/mass_spec_img/mass_spec_img/data/raw_img_v2/masks/SQ1636_mask/SQ1636_mask.png"
-image_path = "/home/mass_spec_img/mass_spec_img/data/raw_img_v2/SQ1636_images"
-output = "/home/mass_spec_img/mass_spec_img/data/cropped/SQ1636_v2_cropped""""
-
-mask_path = sys.argv[1]
+mask_paths = sys.argv[1]
 image_path = sys.argv[2]
-output_path = sys.argv[3]
-output_size = sys.argv[4]
+output_path = sys.argv[3] if len(sys.argv) > 3 else None
+output_size = int(sys.argv[4]) if len(sys.argv) > 4 else 224
 
-# get object coordinates
-object_coords = get_object_coordinates(mask_path)
-file_name = mask_path.split("/")[-1]
-# print results
-print(f"Detected {len(object_coords)} objects in {file_name}:")
-for i, (top_left, bottom_right) in enumerate(object_coords):
-    print(f"Object #{i+1}:")
-    print(f"  Top Left: ({top_left[0]}, {top_left[1]})")
-    print(f"  Bottom-right: ({bottom_right[0]}, {bottom_right[1]})")
+masks = [f for f in os.listdir(mask_paths)]
+image_folders = [f for f in os.listdir(image_path) if f.endswith("_images")]
+print(image_folders)
+for idx, mask in enumerate(masks):
+    mask_img = [f for f in os.listdir(os.path.join(mask_paths, mask)) if f.endswith(".png")]
+    if len(mask_img) > 1:
+        raise ValueError(f"Multiple image files detected! There should only be one mask image per folder.")
+    mask_img = mask_img[0]
+    # get object coordinates
+    object_coords = get_object_coordinates(os.path.join(mask_paths, mask, mask_img))
+    file_name = mask_img.split("_")[0]
+    print(file_name)
+    # print out coordinates of each detected object
+    print(f"Detected {len(object_coords)} objects in {file_name}:")
+    for i, (top_left, bottom_right) in enumerate(object_coords):
+        print(f"Object #{i + 1}:")
+        print(f"  Top Left: ({top_left[0]}, {top_left[1]})")
+        print(f"  Bottom-right: ({bottom_right[0]}, {bottom_right[1]})")
 
-extract_objects(image_path, object_coords, output_size, output_path)
+    for img_folder in image_folders:
+        if img_folder.startswith(file_name):
+            img_path_full = os.path.join(image_path, img_folder)
+            extract_objects(img_path_full, object_coords, output_size, output_path)
