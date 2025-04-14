@@ -1,65 +1,59 @@
 import os
-import argparse
-import zarr
 from PIL import Image
 import numpy as np
-import pandas as pd
-from pathlib import Path
+import sys
 
-parser = argparse.ArgumentParser()
+def process_images(input_folder, output_folder):
+    """
+    Process all images in the input folder and save results to output folder.
 
-parser.add_argument('--root_dir',type=str) 
-parser.add_argument('--save_dir',type=str, default='../data/npy')
-parser.add_argument('--file_type', type=str, default='zarr')
-parser.add_argument('--sample_size', type=int, default=None)
+    Args:
+        input_folder (str): Path to folder containing source images
+        output_folder (str): Path to folder where processed images will be saved
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
 
-args = parser.parse_args()
-root_dir = args.root_dir
-save_dir = args.save_dir
-file_type = args.file_type
+    # Get all files in the input directory
+    files = os.listdir(input_folder)
 
-fn_ls = [str(img) for img in Path(root_dir).rglob('*cropped/*.png')]
-print(len(fn_ls))
-fn_ls.sort()
-for i in range(4):
-    arr = []
-    channel_names = []
-    for fn in fn_ls:
-        slide_name = fn.split('/')[-2].split('_')[0]
-        s = fn.split('_')[-2]
-        if s.endswith(str(i+1)):
-            r = fn.split('_')[-1][0]
-            channel = np.asarray(Image.open(fn).convert('L'))    # read image as single channel and convert to np array
-            arr.append(channel)
-            file_name = fn.split('/')[-1].split('.png')[0][:-5]  # record file name
-            file_name = "-".join(file_name.split(' '))
-            channel_names.append(file_name)
-    arr = np.array(arr)
-    print(f'Shape of slide {i+1} in {root_dir}: {arr.shape}.')
-    df = pd.DataFrame(channel_names, columns=['channel_name'])
-    if file_type == 'npy':
-        out = os.path.join(save_dir, f'{slide_name}_s{i+1}_{r}.npy')
-        np.save(out, arr)
-        print(f'Data saved to {out}')
-        channel_fn = os.path.join(save_dir, f'{slide_name}_s{i+1}_{r}_channel_names.csv')
-        df.to_csv(channel_fn, header=False)
-        print(f'Channel name list saved to {channel_fn}')
+    for filename in files:
+        # Check if file is an image (simple check, extend if needed)
+        if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+            # Load image
+            img_path = os.path.join(input_folder, filename)
+            img = Image.open(img_path)
 
-    elif file_type == 'zarr':
-        out = os.path.join(save_dir, f'{slide_name}_s{i+1}_{r}')
-        os.makedirs(out, exist_ok=True)
-        zarr.save(f'{out}/slide.zarr', arr)
-        print(f'Data saved to {out}/slide.zarr')
-        channel_fn = os.path.join(out, f'{slide_name}_s{i+1}_{r}_channel_names.csv')
-        df.to_csv(channel_fn, header=False)
-        print(f'Channel name list saved to {channel_fn}')
+            # Convert to grayscale
+            gray_img = img.convert('L')
 
-    else:
-        print(f'wrong file type: {file_type}!')
-    
-    
-    
-    
-    
-    
-    
+            # Get dimensions
+            width, height = gray_img.size
+            max_dim = max(width, height)
+
+            # Create a square canvas with the max dimension
+            square_img = Image.new('L', (max_dim, max_dim), 0)  # 'L' mode for grayscale, 0 for black background
+
+            # Calculate position to paste original (centered)
+            paste_x = (max_dim - width) // 2
+            paste_y = (max_dim - height) // 2
+
+            # Paste grayscale image onto square canvas
+            square_img.paste(gray_img, (paste_x, paste_y))
+
+            # Resize to 224x224
+            final_img = square_img.resize((224, 224), Image.LANCZOS)  # LANCZOS for high-quality downsampling
+
+            # Save the processed image
+            output_path = os.path.join(output_folder, filename)
+            final_img.save(output_path)
+
+            print(f"Processed: {filename}")
+
+
+# Example usage
+if __name__ == "__main__":
+    input_folder = sys.argv[1]  # Change this to your input folder
+    output_folder = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+
+    process_images(input_folder, output_folder)
