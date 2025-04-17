@@ -7,3 +7,4 @@ notebooks/.ipynb_checkpoints/
 *.sh
 *.error
 *.out
+*.npy
