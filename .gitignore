@@ -8,4 +8,5 @@ notebooks/.ipynb_checkpoints/
 *.error
 *.out
 *.npy
-PCA_image_normalized_per_tissue.png
+*.png
+*.jpeg
