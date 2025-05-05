@@ -29,10 +29,19 @@ def process_images(input_folder, output_folder):
                     img_path = os.path.join(input_folder, sf, filename)
                     img = Image.open(img_path)
 
-                    # Convert to grayscale
-                    gray_img = img.convert('L')
+                    # Convert to RGB if not already
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    
+                    # Get the red channel only
+                    r, g, b = img.split()
+                    
+                    # Use the red channel as the basis for the black and white image
+                    # No need to change anything since we want highest red to be white
+                    bw_img = r
+                    
                     # Get dimensions
-                    width, height = gray_img.size
+                    width, height = bw_img.size
                     max_dim = max(width, height)
 
                     # Create a square canvas with the max dimension
@@ -43,7 +52,7 @@ def process_images(input_folder, output_folder):
                     paste_y = (max_dim - height) // 2
 
                     # Paste grayscale image onto square canvas
-                    square_img.paste(gray_img, (paste_x, paste_y))
+                    square_img.paste(bw_img, (paste_x, paste_y))
 
                     # Resize to 224x224
                     final_img = square_img.resize((224, 224), Image.LANCZOS)  # LANCZOS for high-quality downsampling

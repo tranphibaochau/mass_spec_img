@@ -10,3 +10,4 @@ notebooks/.ipynb_checkpoints/
 *.npy
 *.png
 *.jpeg
+*.pt
